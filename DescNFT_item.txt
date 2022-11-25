@@ -1,0 +1,200 @@
+Основной стандарт - https://github.com/ton-blockchain/TIPs/issues/62
+
+A standard interface will greatly simplify interaction and display of different 
+entities representing right of ownership.
+
+NFT standard describes:
+
+    The way of ownership changing.
+    The way of association of items into collections.
+    The way of deduplication of common part of collection.
+
+NFT item smart contract
+Internal message handlers
+
+1. transfer
+Request
+TL-B schema of inbound message:
+
+    transfer#5fcc3d14 query_id:uint64 new_owner:MsgAddress response_destination:MsgAddress 
+    custom_payload:(Maybe ^Cell) forward_amount:(VarUInteger 16) 
+    forward_payload:(Either Cell ^Cell) = InternalMsgBody;
+
+query_id - arbitrary request number.
+new_owner - address of the new owner of the NFT item.
+response_destination - address where to send a response with confirmation of a successful 
+    transfer and the rest of the incoming message coins.
+custom_payload - optional custom data.
+forward_amount - the amount of nanotons to be sent to the new owner.
+forward_payload - optional custom data that should be sent to the new owner.
+
+Should be rejected if:
+    message is not from current owner.
+    there is no enough coins (with respect to NFT own storage fee guidelines) to process 
+        operation and send forward_amount.
+    After processing the request, the contract must send at least in_msg_value - forward_amount 
+        - max_tx_gas_price to the response_destination address.
+    If the contract cannot guarantee this, it must immediately stop executing the request and 
+        throw error.
+    max_tx_gas_price is the price in Toncoins of maximum transaction gas limit of NFT habitat 
+    workchain. For the basechain it can be obtained from ConfigParam 21 from gas_limit field.
+
+Otherwise should do:
+    change current owner of NFT to new_owner address.
+    if forward_amount > 0 send message to new_owner address with forward_amount nanotons 
+        attached and with the following layout:
+
+    TL-B schema: 
+
+        ownership_assigned#05138d91 query_id:uint64 prev_owner:MsgAddress 
+        forward_payload:(Either Cell ^Cell) = InternalMsgBody;
+
+    query_id should be equal with request's query_id.
+    forward_payload should be equal with request's forward_payload.
+    prev_owner is address of the previous owner of this NFT item.
+    If forward_amount is equal to zero, notification message should not be sent.
+    Send all excesses of incoming message coins to response_destination with the following layout:
+
+    TL-B schema: 
+
+        excesses#d53276db query_id:uint64 = InternalMsgBody;
+
+    query_id should be equal with request's query_id.
+
+2 get_static_data
+Request
+
+TL-B schema of inbound message:
+
+    get_static_data#2fcb26a2 query_id:uint64 = InternalMsgBody;
+
+query_id - arbitrary request number.
+
+should do:
+    Send back message with the following layout and send-mode 64 (return msg amount except gas 
+        fees):
+
+    TL-B schema: 
+
+        report_static_data#8b771735 query_id:uint64 index:uint256 
+        collection:MsgAddress = InternalMsgBody;
+
+    query_id should be equal with request's query_id.
+    index - numerical index of this NFT in the collection, usually serial number of deployment.
+    collection - address of the smart contract of the collection to which this NFT belongs.
+
+Get-methods
+
+    get_nft_data() returns (int init?, int index, slice collection_address, 
+        slice owner_address, cell individual_content)
+
+    init? - if not zero, then this NFT is fully initialized and ready for interaction.
+    index - numerical index of this NFT in the collection. For collection-less NFT - 
+        arbitrary but constant value.
+    collection_address - (MsgAddress) address of the smart contract of the collection to 
+        which this NFT belongs. For collection-less NFT this parameter should be addr_none;
+    owner_address - (MsgAddress) address of the current owner of this NFT.
+    individual_content -
+        if NFT has collection - individual NFT content in any format;
+        if NFT has no collection - NFT content in format that complies with standard TIP-64.
+
+=====================
+NFTEditable
+Extension for NFT Standard.
+    Introducing editor role on collection level simplifies process of mass update as well as 
+        signalling of impossibility of such mass update
+    Introducing editor role on NFT level simplifies process of per NFT updates and provide 
+        interface for algorithmic updates
+
+Specification
+Internal messages
+1. edit_content
+
+Request
+
+TL-B schema of inbound message:
+
+    edit_content#1a0b9d51 query_id:uint64 payload:Cell = EditRequest;
+
+Should be rejected if:
+
+Message is not from current editor.
+Otherwise should do:
+Update NFT content according it' inner logic and payload.
+
+2. transfer_editorship
+Request
+
+TL-B schema of inbound message:
+
+    transfer_editorship#1c04412a query_id:uint64 new_editor:MsgAddress 
+    response_destination:MsgAddress custom_payload:(Maybe ^Cell) 
+    forward_amount:(VarUInteger 16) forward_payload:(Either Cell ^Cell) = EditRequest;
+
+query_id - arbitrary request number.
+new_editor - address of the new editor of the NFT item.
+response_destination - address where to send a response with confirmation of a successful 
+    transfer and the rest of the coins.
+custom_payload - optional custom data.
+forward_amount - the amount of nanotons to be sent to the new editor.
+forward_payload - optional custom data that should be sent to the new editor.
+
+Should be rejected if:
+    message is not from current editor.
+    there is no enough coins (with respect to NFT own storage fee guidelines) to process 
+        operation and send forward_amount.
+    After processing the request, the contract must send at least in_msg_value - forward_amount 
+        - max_tx_gas_price to the response_destination address.
+    If the contract cannot guarantee this, it must immediately stop executing the request and 
+        throw error.
+    max_tx_gas_price is the price in Toncoins of maximum transaction gas limit of NFT habitat 
+        workchain. For the basechain it can be obtained from ConfigParam 21.
+
+Otherwise should do:
+
+    change current editor of NFT to new_editor address.
+
+    if forward_amount > 0 send message to new_editor address with forward_amount nanotons 
+        attached and with the following layout:
+
+    TL-B schema: 
+        editorship_assigned#511a4463 query_id:uint64 prev_editor:MsgAddress 
+        forward_payload:(Either Cell ^Cell) = InternalMsgBody;
+
+    query_id should be equal with request's query_id.
+    forward_payload should be equal with request's forward_payload.
+    prev_editor is address of the previous editor of this NFT item.
+    If forward_amount is equal to zero, notification message should not be sent.
+
+    Send all excesses of incoming message coins to response_destination with the following layout:
+    
+    TL-B schema: 
+        excesses#d53276db query_id:uint64 = InternalMsgBody;
+
+    query_id should be equal with request's query_id.
+
+Get-methods
+
+    get_editor returns (slice editor)
+    return slice of type MsgAddress - address of editor which can update common content in NFT 
+        collection/NFT item.
+    
+    TL-B Schema
+        edit_content query_id:uint64 payload:Cell = InternalMsgBody;
+        transfer_editorship query_id:uint64 new_editor:MsgAddress 
+            response_destination:MsgAddress custom_payload:(Maybe ^Cell)  
+        forward_amount:(VarUInteger 16) forward_payload:(Either Cell ^Cell) = InternalMsgBody;
+
+        editorship_assigned query_id:uint64 prev_editor:MsgAddress 
+            forward_payload:(Either Cell ^Cell) = InternalMsgBody;
+
+crc32('edit_content query_id:uint64 payload:Cell = InternalMsgBody') 
+    = 0x1a0b9d51 & 0x7fffffff = 0x1a0b9d51
+crc32('transfer_editorship query_id:uint64 new_editor:MsgAddress 
+    response_destination:MsgAddress custom_payload:Maybe ^Cell 
+    forward_amount:VarUInteger 16 forward_payload:Either Cell ^Cell = InternalMsgBody') 
+    = 0x9c04412a & 0x7fffffff = 0x1c04412a
+crc32('editorship_assigned query_id:uint64 prev_editor:MsgAddress 
+    forward_payload:Either Cell ^Cell = InternalMsgBody') 
+    = 0xd11a4463 & 0x7fffffff = 0x511a4463
+
